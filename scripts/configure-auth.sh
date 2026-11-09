@@ -24,16 +24,19 @@ DISPLAY_NAME="$APP-web"
 REDIRECT="https://$HOST/.auth/login/aad/callback"
 
 echo "» App Registration '$DISPLAY_NAME' suchen/anlegen"
-CLIENT_ID=$(az ad app list --display-name "$DISPLAY_NAME" --query "[0].appId" -o tsv)
-if [[ -z "$CLIENT_ID" ]]; then
-  CLIENT_ID=$(az ad app create --display-name "$DISPLAY_NAME" \
+OBJ_ID=$(az ad app list --display-name "$DISPLAY_NAME" --query "[0].id" -o tsv)
+if [[ -z "$OBJ_ID" ]]; then
+  OBJ_ID=$(az ad app create --display-name "$DISPLAY_NAME" \
     --sign-in-audience AzureADMyOrg \
-    --web-redirect-uris "$REDIRECT" \
-    --enable-id-token-issuance true \
-    --query appId -o tsv)
-else
-  az ad app update --id "$CLIENT_ID" --web-redirect-uris "$REDIRECT" --enable-id-token-issuance true
+    --query id -o tsv)
+  sleep 10  # Entra-Replikation abwarten
 fi
+CLIENT_ID=$(az ad app show --id "$OBJ_ID" --query appId -o tsv)
+
+# Direkter Graph-PATCH statt az ad app update (robuster bei frisch angelegten Apps)
+az rest --method PATCH \
+  --uri "https://graph.microsoft.com/v1.0/applications/$OBJ_ID" \
+  --body "{\"web\":{\"redirectUris\":[\"$REDIRECT\"],\"implicitGrantSettings\":{\"enableIdTokenIssuance\":true}}}"
 
 # Delegierte Berechtigung Microsoft Graph User.Read (für den Login ausreichend)
 az ad app permission add --id "$CLIENT_ID" \
