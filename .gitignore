@@ -8,3 +8,5 @@ next-env.d.ts
 .env
 .DS_Store
 *.zip
+infra/main.json
+.azure/validate-status.json
