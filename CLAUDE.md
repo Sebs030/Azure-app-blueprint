@@ -19,6 +19,9 @@ Architektur und Vorgaben: siehe README.md.
 ## Infra
 - Infrastruktur nur über `infra/main.bicep`. Vor jedem Deployment `az deployment group what-if`.
 - Ein Bicep-Deployment überschreibt alle App Settings → danach `scripts/configure-auth.sh` erneut ausführen.
+- `configure-auth.sh` auf Windows immer via `bash` aufrufen (CRLF-Problem). Bei CLI-Versionsfehlern (`auth v1/v2`) direkt `az rest PUT authsettingsV2` nutzen – Beispiel im README.
+- Nach dem **ersten** Deployment mit `WEBSITE_RUN_FROM_PACKAGE=1` ggf. manuellen App-Restart nötig (Azure Portal oder `az webapp restart`).
+- GitHub OIDC: Audience muss `api://AzureADTokenExchange` sein (nicht `api://AzureADMyOrg`). GitHub kodiert seit 2024 numerische IDs in den Subject-Claim (`repo:OWNER@USERID/REPO@REPOID:ref:...`) → Federated Credential muss exakt diesen Subject matchen. Subject im Fehlerlog ablesen.
 - Keine Ressourcen mit Fixkosten (Private Endpoints, Front Door, Redis …) ohne Rückfrage.
 
 ## Checks
