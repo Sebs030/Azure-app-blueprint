@@ -1,5 +1,5 @@
 using './main.bicep'
 
-param appName = 'intool'
+param appName = 'azdemo'
 param appServiceSku = 'B1'
-param owner = 'TODO-owner'
+param owner = 'sebastian@5thindustry.de'
