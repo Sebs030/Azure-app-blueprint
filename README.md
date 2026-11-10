@@ -3,17 +3,20 @@
 Blueprint-Demo: Next.js (App Router, standalone) auf **Azure App Service Linux**,
 Login per **Easy Auth (Microsoft Entra ID, Single Tenant)**.
 Nach der Anmeldung sieht der Nutzer einen Startscreen mit persönlicher Begrüßung,
-Schnellzugriff-Kacheln und seinen Kontodaten.
+Schnellzugriff-Kacheln und seinen Kontodaten. Unter **/lieferanten** gibt es eine Kontaktverwaltung
+für Lieferanten (Firma, Anschrift, Ansprechpartner …) – gebaut mit **Server Actions** auf **Azure SQL**.
 
 ```
 Browser ──► App Service (Linux, Node 22, Next.js standalone)
-             └─ Easy Auth erzwingt Login → Header X-MS-CLIENT-PRINCIPAL* → src/lib/auth.ts
+             ├─ Easy Auth erzwingt Login → Header X-MS-CLIENT-PRINCIPAL* → src/lib/auth.ts
+             └─► Azure SQL Database (Serverless, Free Offer)  [Managed Identity, kein Passwort]
 Monitoring: Application Insights (workspace-based, Tagesdeckel 0,1 GB)
 ```
 
-**Umfang der Demo:** Web App, Auth, Monitoring, CI/CD. Azure SQL und Functions aus dem Blueprint
-sind bewusst noch nicht enthalten (siehe [Nächste Schritte](#nächste-schritte)).
+**Umfang der Demo:** Web App, Auth, Azure SQL, Monitoring, CI/CD. Azure Functions aus dem Blueprint
+folgen später (siehe [Nächste Schritte](#nächste-schritte)).
 Kosten: im Wesentlichen der App Service Plan B1 (ca. 12–15 €/Monat), mit `F1` kostenlos.
+Azure SQL im Free Offer: 0 € im Rahmen des Kontingents (danach pausiert die DB bis Monatsende).
 
 ## Stack
 
@@ -22,14 +25,24 @@ Kosten: im Wesentlichen der App Service Plan B1 (ca. 12–15 €/Monat), mit `F1
 | Next.js | 15.5 | `@mui/material-nextjs` v6 unterstützt nur Next ≤ 15 – daher nicht Next 16 |
 | MUI | 6.5 (`@mui/material`, `@mui/icons-material`, `@mui/material-nextjs`) | v6 wegen `Grid2` |
 | Tailwind CSS | 4 | nur Utilities, CSS-Layer mit MUI |
-| Tests | Vitest | u. a. Dev-Fallback greift nicht in Produktion |
+| Daten | Kysely + Tedious (MSSQL), Zod | Entra-Auth per `azure-active-directory-default` |
+| Tests | Vitest | u. a. Dev-Fallback greift nicht in Produktion, Validierung, Retry |
 
 ## Projektstruktur
 
 ```
-infra/main.bicep, main.bicepparam   Web App, Plan, App Insights, Log Analytics
+infra/main.bicep, main.bicepparam   Web App, Plan, Azure SQL, App Insights, Log Analytics
 scripts/configure-auth.sh           Easy Auth + App Registration (idempotent)
-src/app/page.tsx                    Startscreen
+scripts/migrate.ts                  npm run db:migrate (Kysely-Migrationen, lokal als Entra-Admin)
+scripts/grant-sql-access.ts         npm run db:grant (DB-User für Managed Identity)
+db/migrations/                      Tabelle suppliers
+src/app/(app)/layout.tsx            Login-Gate + Kopfzeile für alle Seiten
+src/app/(app)/page.tsx              Startscreen
+src/app/(app)/lieferanten/          Liste/Suche, neu, bearbeiten
+src/app/(app)/lieferanten/actions.ts  Server Actions (anlegen, ändern, löschen)
+src/components/SupplierForm.tsx     Formular mit useActionState + Feldfehlern
+src/lib/db.ts                       Kysely + Tedious + Managed Identity, Retry für Resume-from-pause
+src/lib/suppliers/                  Zod-Schema, Repository (SQL bzw. lokal In-Memory)
 src/app/api/me/route.ts             Beispiel-Route-Handler mit requireUser()
 src/components/AppHeader.tsx        Kopfzeile mit Benutzermenü / Abmelden
 src/lib/auth.ts                     Identität aus Easy-Auth-Headern
@@ -56,6 +69,10 @@ Lokal gibt es kein Easy Auth. `DEV_USER_NAME` in `.env.local` simuliert einen an
 Nutzer (nur bei `NODE_ENV !== production`). Ohne die Variable erscheint der Screen
 „Anmeldung erforderlich".
 
+**Daten lokal:** Ohne `SQL_SERVER`/`SQL_DATABASE` nutzt die Lieferantenseite einen In-Memory-Speicher
+mit drei Demo-Lieferanten (geht beim Neustart verloren, in Produktion deaktiviert). Mit beiden
+Variablen in `.env.local` spricht die App direkt mit Azure SQL – angemeldet über `az login`.
+
 Checks: `npm run typecheck && npm test && npm run build`
 
 ## Deployment nach Azure
@@ -75,7 +92,25 @@ az group create -n rg-intool-proto -l germanywestcentral --tags project=intool e
 
 ### 2. Infrastruktur (Bicep)
 
-`infra/main.bicepparam` anpassen (`appName`, `owner`, ggf. `appServiceSku`), dann:
+**Vorab prüfen:** Das Azure SQL Free Offer gibt es nur **einmal pro Subscription**. Falls schon
+eine Free-DB existiert (Ausgabe nicht leer), `useSqlFreeOffer = false` setzen (kostet dann nach Verbrauch):
+
+```bash
+az sql server list --query "[].[name,resourceGroup]" -o tsv | while read -r n g; do az sql db list -s "$n" -g "$g" --query "[?useFreeLimit].name" -o tsv; done
+```
+
+Eigene Object-ID (für den SQL-Entra-Admin) und öffentliche IP (für Migrationen):
+
+```bash
+az ad signed-in-user show --query "{login:userPrincipalName, id:id}" -o table
+```
+
+```bash
+curl -s https://api.ipify.org
+```
+
+`infra/main.bicepparam` anpassen (`appName`, `owner`, `sqlAdminLogin`, `sqlAdminObjectId`, `devIp`,
+ggf. `appServiceSku`), dann:
 
 ```bash
 az deployment group what-if -g rg-intool-proto -f infra/main.bicep -p infra/main.bicepparam
@@ -85,7 +120,28 @@ az deployment group what-if -g rg-intool-proto -f infra/main.bicep -p infra/main
 az deployment group create -g rg-intool-proto -f infra/main.bicep -p infra/main.bicepparam --query properties.outputs
 ```
 
-Den Output `webAppName` für die nächsten Schritte notieren.
+Die Outputs `webAppName`, `sqlServerFqdn` und `sqlDatabaseName` für die nächsten Schritte notieren.
+
+> **Bestehendes Deployment um SQL erweitern:** Einfach erneut `what-if` + `create` ausführen – Web App
+> und Plan bleiben erhalten (gleiche Namen), SQL Server und DB kommen hinzu. Da dabei alle App Settings
+> neu gesetzt werden, danach **`scripts/configure-auth.sh` erneut ausführen** (sonst ist der Login weg).
+
+### 2b. Datenbank: Schema + Zugriff für die Web App
+
+In `.env.local` `SQL_SERVER=<sqlServerFqdn>` und `SQL_DATABASE=<sqlDatabaseName>` eintragen.
+Beide Befehle laufen **lokal als Entra-Admin** (`az login`, eigene IP via `devIp` freigegeben):
+
+```bash
+npm run db:migrate
+```
+
+```bash
+npm run db:grant -- <webAppName>
+```
+
+`db:grant` legt den DB-User für die Managed Identity der Web App an (`CREATE USER … FROM EXTERNAL
+PROVIDER`) und gibt ihr nur `db_datareader` + `db_datawriter`. Schemaänderungen (DDL) macht nur der
+Entwickler per Migration, nie die App.
 
 ### 3. Microsoft SSO (Easy Auth)
 
@@ -186,6 +242,9 @@ Danach deployt jeder Push auf `main` (oder manuell per *Run workflow*).
 - [ ] Web-URL im Inkognito-Fenster → Microsoft-Login → Startscreen mit eigenem Namen.
 - [ ] Nicht zugewiesener Nutzer wird von Entra abgewiesen.
 - [ ] „Abmelden" im Benutzermenü führt über `/.auth/logout` zurück zum Login.
+- [ ] Unter `/lieferanten` einen Lieferanten anlegen, bearbeiten, löschen (schreibt in Azure SQL).
+- [ ] Nach > 60 Min Pause: erster Aufruf zeigt Ladezustand, klappt dank Retry trotzdem.
+- [ ] SQL-Login mit Benutzername/Passwort wird abgewiesen (Entra-only).
 - [ ] Requests erscheinen in Application Insights.
 
 ## Design
@@ -193,6 +252,21 @@ Danach deployt jeder Push auf `main` (oder manuell per *Run workflow*).
 - Gradient zentral als `--neural-grad` in `src/app/globals.css` – aktuell ein **Platzhalter**
   (Indigo → Violett → Cyan). Finalen Wert dort eintragen, alle Flächen übernehmen ihn.
 - Konventionen (Grid2, Pill-Buttons, keine hardcodierten Gradient-Farben): siehe `CLAUDE.md`.
+
+## Server Actions – das Muster
+
+`src/app/(app)/lieferanten/actions.ts` zeigt das Muster für alle schreibenden Vorgänge:
+
+1. `await requireUser()` als erste Zeile (Server Actions sind öffentliche Endpunkte!)
+2. Eingaben aus `FormData` lesen und mit **Zod** validieren (`src/lib/suppliers/schema.ts`)
+3. Bei Fehlern `{ values, fieldErrors }` zurückgeben → das Formular zeigt sie per `useActionState` an den Feldern
+4. Speichern über das Repository (mit Retry), `revalidatePath()`, `redirect()`
+
+Hinweis: In dieser Demo darf jeder angemeldete (zugewiesene) Nutzer alle Lieferanten bearbeiten.
+Feinere Rechte später über App Roles (`user.roles`).
+
+Falls hinter dem App-Service-Proxy „Invalid Server Actions request" auftritt:
+`experimental.serverActions.allowedOrigins` in `next.config.ts` setzen.
 
 ## Troubleshooting
 
@@ -209,5 +283,4 @@ Danach deployt jeder Push auf `main` (oder manuell per *Run workflow*).
 
 ## Nächste Schritte
 
-Gemäß Blueprint, noch nicht umgesetzt: Azure SQL (Serverless Free Offer, Managed Identity, Kysely),
-Azure Functions (Flex Consumption), Budget-Alarm, eigene Domain.
+Gemäß Blueprint, noch nicht umgesetzt: Azure Functions (Flex Consumption), Budget-Alarm, eigene Domain.

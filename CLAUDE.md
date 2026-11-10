@@ -16,6 +16,12 @@ Architektur und Vorgaben: siehe README.md.
 - Identität kommt ausschließlich aus den Easy-Auth-Headern. Der Dev-Fallback (`DEV_USER_*`) darf in Produktion nie greifen – Test in `src/lib/auth.test.ts` nicht entfernen.
 - Kein Secret im Code oder Repo. Konfiguration über App Settings. Datenbankzugriff (später) nur über Managed Identity.
 
+## Daten
+- DB-Zugriff nur über Repositories (`src/lib/suppliers/repo.ts` als Vorlage), Queries in `withRetry()` (Serverless-DB wacht auf).
+- Schreibvorgänge als Server Action: `requireUser()` → Zod-Validierung → Repository → `revalidatePath`/`redirect`.
+- Schemaänderungen nur als neue Datei in `db/migrations/` (Kysely), ausgeführt lokal per `npm run db:migrate`. Die App-Identität hat keine DDL-Rechte.
+- Der In-Memory-Speicher ist nur für lokale Entwicklung ohne SQL – in Produktion nie.
+
 ## Infra
 - Infrastruktur nur über `infra/main.bicep`. Vor jedem Deployment `az deployment group what-if`.
 - Ein Bicep-Deployment überschreibt alle App Settings → danach `scripts/configure-auth.sh` erneut ausführen.

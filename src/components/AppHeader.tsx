@@ -1,7 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import {
+  Button,
   AppBar,
   Avatar,
   Box,
@@ -19,8 +22,15 @@ import { initials } from "@/lib/format";
 
 type Props = { name: string; email?: string; logoutUrl: string };
 
+const nav = [
+  { href: "/", label: "Start" },
+  { href: "/lieferanten", label: "Lieferanten" },
+];
+
 export function AppHeader({ name, email, logoutUrl }: Props) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
+  const pathname = usePathname();
+  const isActive = (href: string) => (href === "/" ? pathname === "/" : pathname.startsWith(href));
 
   return (
     <AppBar
@@ -47,9 +57,32 @@ export function AppHeader({ name, email, logoutUrl }: Props) {
         >
           <AutoAwesomeRounded fontSize="small" />
         </Box>
-        <Typography variant="h6" component="span" sx={{ fontSize: 17 }}>
+        <Typography
+          variant="h6"
+          component={Link}
+          href="/"
+          sx={{ fontSize: 17, color: "inherit", textDecoration: "none", mr: { xs: 0.5, sm: 2 } }}
+        >
           Intool
         </Typography>
+        <Box component="nav" aria-label="Hauptnavigation" sx={{ display: "flex", gap: 0.5 }}>
+          {nav.map((n) => (
+            <Button
+              key={n.href}
+              component={Link}
+              href={n.href}
+              size="small"
+              aria-current={isActive(n.href) ? "page" : undefined}
+              sx={{
+                color: isActive(n.href) ? "primary.main" : "text.secondary",
+                bgcolor: isActive(n.href) ? "rgba(79,70,229,0.08)" : "transparent",
+                px: 1.75,
+              }}
+            >
+              {n.label}
+            </Button>
+          ))}
+        </Box>
         <Box sx={{ flex: 1 }} />
         <IconButton
           onClick={(e) => setAnchor(e.currentTarget)}
