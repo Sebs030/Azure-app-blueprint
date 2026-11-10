@@ -1,20 +1,28 @@
-import { Box, Button, Card, CardContent, Chip, Container, Stack, Typography } from "@mui/material";
+import Link from "next/link";
+import { Box, Button, Card, CardActionArea, CardContent, Chip, Container, Stack, Typography } from "@mui/material";
 import Grid from "@mui/material/Grid2";
 import ArrowForwardRounded from "@mui/icons-material/ArrowForwardRounded";
 import DashboardRounded from "@mui/icons-material/DashboardRounded";
 import DescriptionRounded from "@mui/icons-material/DescriptionRounded";
-import GroupsRounded from "@mui/icons-material/GroupsRounded";
+import LocalShippingRounded from "@mui/icons-material/LocalShippingRounded";
 import InsightsRounded from "@mui/icons-material/InsightsRounded";
 import LockRounded from "@mui/icons-material/LockRounded";
 import VerifiedUserRounded from "@mui/icons-material/VerifiedUserRounded";
 import CloudDoneRounded from "@mui/icons-material/CloudDoneRounded";
-import { AppHeader } from "@/components/AppHeader";
-import { getUser, LOGOUT_URL } from "@/lib/auth";
+import { requireUser, LOGOUT_URL } from "@/lib/auth";
 import { firstName, greeting, longDate } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
-const tiles = [
+type Tile = { title: string; text: string; icon: React.ReactNode; href?: string };
+
+const tiles: Tile[] = [
+  {
+    title: "Lieferanten",
+    text: "Kontaktdaten, Anschriften und Ansprechpartner pflegen.",
+    icon: <LocalShippingRounded />,
+    href: "/lieferanten",
+  },
   {
     title: "Dashboard",
     text: "Kennzahlen und aktuelle Vorgänge auf einen Blick.",
@@ -26,11 +34,6 @@ const tiles = [
     icon: <DescriptionRounded />,
   },
   {
-    title: "Team",
-    text: "Ansprechpartner, Zuständigkeiten und Kontakte.",
-    icon: <GroupsRounded />,
-  },
-  {
     title: "Auswertungen",
     text: "Berichte und Analysen für Ihre Projekte.",
     icon: <InsightsRounded />,
@@ -38,17 +41,13 @@ const tiles = [
 ];
 
 export default async function HomePage() {
-  const user = await getUser();
-  if (!user) return <SignedOut />;
+  const user = await requireUser(); // Layout zeigt ohne Login bereits den Anmelde-Screen
 
   const now = new Date();
   const first = firstName(user.name);
 
   return (
-    <Box sx={{ minHeight: "100dvh", bgcolor: "background.default" }}>
-      <AppHeader name={user.name} email={user.email} logoutUrl={LOGOUT_URL} />
-
-      <Container maxWidth="lg" sx={{ py: { xs: 3, md: 5 } }}>
+    <Container maxWidth="lg" sx={{ py: { xs: 3, md: 5 } }}>
         {/* Hero */}
         <Box
           sx={{
@@ -93,11 +92,13 @@ export default async function HomePage() {
             </Typography>
             <Stack direction="row" spacing={1.5} sx={{ pt: 1 }} useFlexGap flexWrap="wrap">
               <Button
+                component={Link}
+                href="/lieferanten"
                 variant="contained"
                 endIcon={<ArrowForwardRounded />}
                 sx={{ bgcolor: "common.white", color: "grey.900", "&:hover": { bgcolor: "grey.100" } }}
               >
-                Loslegen
+                Zu den Lieferanten
               </Button>
               <Button
                 variant="outlined"
@@ -120,7 +121,7 @@ export default async function HomePage() {
             Schnellzugriff
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Module folgen in Kürze
+            Weitere Module folgen
           </Typography>
         </Stack>
         <Grid container spacing={2.5}>
@@ -130,13 +131,17 @@ export default async function HomePage() {
                 sx={{
                   height: "100%",
                   transition: "transform .2s ease, box-shadow .2s ease, border-color .2s ease",
-                  "&:hover": {
-                    transform: "translateY(-3px)",
-                    boxShadow: "0 12px 32px -12px rgba(79,70,229,0.35)",
-                    borderColor: "rgba(79,70,229,0.35)",
-                  },
+                  "&:hover": t.href
+                    ? {
+                        transform: "translateY(-3px)",
+                        boxShadow: "0 12px 32px -12px rgba(79,70,229,0.35)",
+                        borderColor: "rgba(79,70,229,0.35)",
+                      }
+                    : {},
+                  opacity: t.href ? 1 : 0.85,
                 }}
               >
+                <TileAction href={t.href}>
                 <CardContent sx={{ p: 3 }}>
                   <Box
                     sx={{
@@ -154,12 +159,17 @@ export default async function HomePage() {
                   </Box>
                   <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
                     <Typography fontWeight={600}>{t.title}</Typography>
-                    <Chip label="Bald" size="small" variant="outlined" sx={{ height: 20, fontSize: 11 }} />
+                    {t.href ? (
+                      <Chip label="Neu" size="small" color="primary" sx={{ height: 20, fontSize: 11 }} />
+                    ) : (
+                      <Chip label="Bald" size="small" variant="outlined" sx={{ height: 20, fontSize: 11 }} />
+                    )}
                   </Stack>
                   <Typography variant="body2" color="text.secondary">
                     {t.text}
                   </Typography>
                 </CardContent>
+                </TileAction>
               </Card>
             </Grid>
           ))}
@@ -201,8 +211,7 @@ export default async function HomePage() {
         <Typography variant="caption" color="text.secondary" component="p" sx={{ textAlign: "center", mt: 6 }}>
           Interne Anwendung · Prototyp
         </Typography>
-      </Container>
-    </Box>
+    </Container>
   );
 }
 
@@ -252,46 +261,11 @@ function StatusRow({ icon, title, text }: { icon: React.ReactNode; title: string
   );
 }
 
-function SignedOut() {
+function TileAction({ href, children }: { href?: string; children: React.ReactNode }) {
+  if (!href) return <>{children}</>;
   return (
-    <Box
-      sx={{
-        minHeight: "100dvh",
-        display: "grid",
-        placeItems: "center",
-        p: 3,
-        background: "var(--neural-grad)",
-      }}
-    >
-      <Card sx={{ maxWidth: 420, width: "100%", borderRadius: 6 }}>
-        <CardContent sx={{ p: 4, textAlign: "center" }}>
-          <Box
-            sx={{
-              width: 52,
-              height: 52,
-              mx: "auto",
-              mb: 2,
-              borderRadius: 3.5,
-              display: "grid",
-              placeItems: "center",
-              color: "common.white",
-              background: "var(--neural-grad)",
-            }}
-          >
-            <LockRounded />
-          </Box>
-          <Typography variant="h6" component="h1">
-            Anmeldung erforderlich
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 1, mb: 3 }}>
-            Bitte melden Sie sich mit Ihrem Microsoft-Konto an. Lokal: <code>DEV_USER_NAME</code> in{" "}
-            <code>.env.local</code> setzen.
-          </Typography>
-          <Button variant="contained" href="/.auth/login/aad?post_login_redirect_uri=/" fullWidth size="large">
-            Mit Microsoft anmelden
-          </Button>
-        </CardContent>
-      </Card>
-    </Box>
+    <CardActionArea component={Link} href={href} sx={{ height: "100%", alignItems: "flex-start" }}>
+      {children}
+    </CardActionArea>
   );
 }

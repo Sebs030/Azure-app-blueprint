@@ -16,9 +16,18 @@ Architektur und Vorgaben: siehe README.md.
 - Identität kommt ausschließlich aus den Easy-Auth-Headern. Der Dev-Fallback (`DEV_USER_*`) darf in Produktion nie greifen – Test in `src/lib/auth.test.ts` nicht entfernen.
 - Kein Secret im Code oder Repo. Konfiguration über App Settings. Datenbankzugriff (später) nur über Managed Identity.
 
+## Daten
+- DB-Zugriff nur über Repositories (`src/lib/suppliers/repo.ts` als Vorlage), Queries in `withRetry()` (Serverless-DB wacht auf).
+- Schreibvorgänge als Server Action: `requireUser()` → Zod-Validierung → Repository → `revalidatePath`/`redirect`.
+- Schemaänderungen nur als neue Datei in `db/migrations/` (Kysely), ausgeführt lokal per `npm run db:migrate`. Die App-Identität hat keine DDL-Rechte.
+- Der In-Memory-Speicher ist nur für lokale Entwicklung ohne SQL – in Produktion nie.
+
 ## Infra
 - Infrastruktur nur über `infra/main.bicep`. Vor jedem Deployment `az deployment group what-if`.
 - Ein Bicep-Deployment überschreibt alle App Settings → danach `scripts/configure-auth.sh` erneut ausführen.
+- `configure-auth.sh` auf Windows immer via `bash` aufrufen (CRLF-Problem). Bei CLI-Versionsfehlern (`auth v1/v2`) direkt `az rest PUT authsettingsV2` nutzen – Beispiel im README.
+- Nach dem **ersten** Deployment mit `WEBSITE_RUN_FROM_PACKAGE=1` ggf. manuellen App-Restart nötig (Azure Portal oder `az webapp restart`).
+- GitHub OIDC: Audience muss `api://AzureADTokenExchange` sein (nicht `api://AzureADMyOrg`). GitHub kodiert seit 2024 numerische IDs in den Subject-Claim (`repo:OWNER@USERID/REPO@REPOID:ref:...`) → Federated Credential muss exakt diesen Subject matchen. Subject im Fehlerlog ablesen.
 - Keine Ressourcen mit Fixkosten (Private Endpoints, Front Door, Redis …) ohne Rückfrage.
 
 ## Checks
